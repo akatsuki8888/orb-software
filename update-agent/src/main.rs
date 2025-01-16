@@ -62,13 +62,35 @@ fn main() -> UpdateAgentResult {
 
     let args = Args::parse();
 
-    match prepare_settings(&args) {
-        Ok(_) => UpdateAgentResult::Success,
+    match main_inner(&args) {
+        Ok(()) => UpdateAgentResult::Success,
         Err(err) => {
             error!("{err:?}");
             err.into()
         }
     }
+}
+
+/// Helper function to use eyre::Result
+fn main_inner(args: &Args) -> eyre::Result<()> {
+    let settings = setup(&args)?;
+
+    let (proxy, iface) = if !settings.nodbus && !settings.recovery {
+        match setup_dbus() {
+            Ok((proxy, iface)) => (Some(proxy), Some(iface)),
+            Err(err) => {
+                warn!(
+                    "failed connecting to DBus; updates will \
+            be downloaded but not installed: {err:?}"
+                );
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
+    run(settings, proxy.as_ref(), iface.as_ref())
 }
 
 fn get_config_source(args: &Args) -> Cow<'_, Path> {
@@ -84,7 +106,8 @@ fn get_config_source(args: &Args) -> Cow<'_, Path> {
     }
 }
 
-fn prepare_settings(args: &Args) -> eyre::Result<()> {
+/// Initializes the environment, loads settings.
+fn setup(args: &Args) -> eyre::Result<Settings> {
     // TODO: In the event of a corrupt EFIVAR slot, we would be put into an unrecoverable state
     let active_slot =
         slot_ctrl::get_current_slot().wrap_err("failed getting current slot")?;
@@ -106,70 +129,49 @@ fn prepare_settings(args: &Args) -> eyre::Result<()> {
 
     prepare_environment(&settings).wrap_err("failed preparing environment to run")?;
 
-    let (supervisor_proxy, update_iref) = if settings.nodbus || settings.recovery {
-        debug!("nodbus flag set or in recovery; not connecting to dbus");
-        (None, None)
-    } else {
-        zbus::blocking::Connection::session()
-            .map_err(|e| warn!("failed establishing a `session` dbus connection {e:?}"))
-            .ok()
-            .map(|conn| {
-                let supervisor_proxy = proxies::SupervisorProxyBlocking::builder(&conn)
-                    .cache_properties(zbus::CacheProperties::No)
-                    .build()
-                    .map_err(|e| {
-                        warn!("failed creating supervisor proxy: {e:?}");
-                    })
-                    .ok();
+    Ok(settings)
+}
 
-                let update_iref = conn
-                    .request_name("org.worldcoin.UpdateProgress1")
-                    .map_err(|e| {
-                        warn!("failed requesting name for `org.worldcoin.UpdateProgress1`: {e:?}");
-                    })
-                    .and_then(|_| {
-                        let object_server = conn.object_server();
-                        object_server
-                            .at(
-                                "/org/worldcoin/UpdateProgress1",
-                                UpdateProgress(UpdateStatus::default()),
-                            )
-                            .map_err(|e| {
-                                warn!("failed creating object server for `org.worldcoin.UpdateProgress1`: {e:?}");
-                            })
-                            .and_then(|_| {
-                                object_server.interface::<_, UpdateProgress<UpdateStatus>>(
-                                    "org.worldcoin.UpdateProgress1",
-                                )
-                                .map_err(|e| {
-                                    warn!(
-                                        "failed creating interface for `org.worldcoin.UpdateProgress1`: {e:?}"
-                                    );
-                                })
-                            })
-                    })
-                    .ok();
+fn setup_dbus() -> eyre::Result<(
+    proxies::SupervisorProxyBlocking<'static>,
+    InterfaceRef<UpdateProgress<UpdateStatus>>,
+)> {
+    let conn = zbus::blocking::Connection::session()
+        .wrap_err("failed establishing a `session` dbus connection {e:?}")?;
 
-                (supervisor_proxy, update_iref)
-            })
-            .unwrap_or((None, None))
+    let supervisor_proxy = proxies::SupervisorProxyBlocking::builder(&conn)
+        .cache_properties(zbus::CacheProperties::No)
+        .build()
+        .wrap_err("failed creating supervisor proxy: {e:?}")?;
+
+    let update_iface: InterfaceRef<UpdateProgress<UpdateStatus>> = {
+        conn.request_name("org.worldcoin.UpdateProgress1")
+            .wrap_err(
+                "failed requesting name for `org.worldcoin.UpdateProgress1`: {e:?}",
+            )?;
+
+        let object_server = conn.object_server();
+        object_server
+        .at(
+            "/org/worldcoin/UpdateProgress1",
+            UpdateProgress(UpdateStatus::default()),
+        )
+        .wrap_err(
+            "failed creating object server for `org.worldcoin.UpdateProgress1`: {e:?}",
+        )?;
+        object_server
+            .interface("org.worldcoin.UpdateProgress1")
+            .wrap_err(
+                "failed creating interface for `org.worldcoin.UpdateProgress1`: {e:?}",
+            )?
     };
 
-    run(settings, supervisor_proxy, update_iref.as_ref()).inspect_err(|e| {
-        if let Some(iref) = update_iref {
-            iref.get_mut().0.components = Err(zbus::fdo::Error::Failed(e.to_string()));
-            async_io::block_on(iref.get_mut().status_changed(iref.signal_context()))
-                .unwrap_or_else(|e| {
-                    warn!("failed to emit signal on dbus: {e:?}");
-                });
-        }
-    })?;
-    Ok(())
+    Ok((supervisor_proxy, update_iface))
 }
 
 fn run(
     settings: Settings,
-    supervisor_proxy: Option<proxies::SupervisorProxyBlocking<'static>>,
+    supervisor_proxy: Option<&proxies::SupervisorProxyBlocking<'static>>,
     update_iref: Option<&InterfaceRef<UpdateProgress<UpdateStatus>>>,
 ) -> eyre::Result<()> {
     info!(
@@ -268,7 +270,7 @@ fn run(
         &claim,
         &settings.workspace,
         &settings.downloads,
-        supervisor_proxy.as_ref(),
+        supervisor_proxy,
         update_iref,
         settings.download_delay,
     )
