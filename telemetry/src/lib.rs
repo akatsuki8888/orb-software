@@ -1,17 +1,71 @@
 use std::io::IsTerminal as _;
 
+use opentelemetry::trace::TracerProvider;
+use opentelemetry::KeyValue;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{
-    layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter,
+    layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter, Layer,
 };
 
+/// Represents the attributes that will be attached to opentelemetry data for this
+/// service.
+///
+/// This is similar in concept to datadog Tags.
 #[derive(Debug)]
-pub struct TelemetryConfig {
-    syslog_identifier: Option<String>,
-    global_filter: EnvFilter,
+pub struct OpentelemetryAttributes {
+    /// Name of the service
+    pub service_name: String,
+    /// Version of the service. We suggest getting this from `orb-build-info`.
+    pub service_version: String,
+    /// Any additional attributes
+    pub additional_otel_attributes: Vec<opentelemetry::KeyValue>,
 }
 
-impl TelemetryConfig {
+/// To more easily construct this, use [`OpentelmetryLayerBuilder`].
+#[derive(Debug)]
+pub struct OpentelemetryConfig<F> {
+    /// The tracer that will be used for opentelmetry.
+    pub tracer: opentelemetry_sdk::trace::Tracer,
+    /// The layer filter that will be used, might be None.
+    pub filter: F,
+}
+
+impl<F> OpentelemetryConfig<Option<F>> {
+    pub fn new(
+        attrs: OpentelemetryAttributes,
+    ) -> Result<Self, opentelemetry::trace::TraceError> {
+        let trace_provider = opentelemetry_sdk::trace::TracerProvider::builder()
+            .with_resource(opentelemetry_sdk::Resource::new([
+                KeyValue::new("service.name", attrs.service_name.clone()),
+                KeyValue::new("service", attrs.service_name.clone()),
+            ]))
+            .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
+            .with_id_generator(opentelemetry_sdk::trace::RandomIdGenerator::default())
+            .with_batch_exporter(
+                opentelemetry_otlp::SpanExporter::builder()
+                    .with_tonic()
+                    .build()?,
+                opentelemetry_sdk::runtime::Tokio,
+            )
+            .build();
+
+        let tracer = trace_provider.tracer(attrs.service_name);
+
+        Ok(Self {
+            tracer,
+            filter: None,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct TelemetryConfig<F> {
+    syslog_identifier: Option<String>,
+    global_filter: EnvFilter,
+    otel_cfg: Option<OpentelemetryConfig<F>>,
+}
+
+impl<F> TelemetryConfig<F> {
     /// Provides all required arguments for telemetry configuration.
     /// - `log_identifier` will be used for journald, if appropriate.
     #[expect(clippy::new_without_default, reason = "may add required args later")]
@@ -22,6 +76,7 @@ impl TelemetryConfig {
             global_filter: EnvFilter::builder()
                 .with_default_directive(LevelFilter::INFO.into())
                 .from_env_lossy(),
+            otel_cfg: None,
         }
     }
 
@@ -46,6 +101,19 @@ impl TelemetryConfig {
         }
     }
 
+    #[must_use]
+    pub fn with_opentelemetry(self, cfg: OpentelemetryConfig<F>) -> Self {
+        Self {
+            otel_cfg: Some(cfg),
+            ..self
+        }
+    }
+}
+
+impl<F> TelemetryConfig<F>
+where
+    F: tracing_subscriber::layer::Filter<tracing_subscriber::Registry>,
+{
     pub fn try_init(self) -> Result<(), tracing_subscriber::util::TryInitError> {
         let registry = tracing_subscriber::registry();
         // The type is only there to get it to compile.
@@ -72,10 +140,24 @@ impl TelemetryConfig {
             .is_none()
             .then(|| tracing_subscriber::fmt::layer().with_writer(std::io::stderr));
         assert!(stderr_layer.is_some() || journald_layer.is_some());
+        let otel_layer = if let Some(otel_cfg) = self.otel_cfg {
+            Some(
+                tracing_opentelemetry::layer()
+                    .with_level(true)
+                    .with_location(true)
+                    .with_threads(true)
+                    .with_tracer(otel_cfg.tracer)
+                    // commenting out this line fixes it
+                    .with_filter(otel_cfg.filter),
+            )
+        } else {
+            None
+        };
         registry
             .with(tokio_console_layer)
             .with(stderr_layer)
             .with(journald_layer)
+            .with(otel_layer)
             .with(self.global_filter)
             .try_init()
     }
