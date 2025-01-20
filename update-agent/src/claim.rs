@@ -40,7 +40,7 @@ pub enum Error {
     SendCheckUpdateRequest(#[source] reqwest::Error),
     #[error("failed getting the check update response as text")]
     ResponseAsText(#[source] reqwest::Error),
-    #[error("failed reading claim from path: {}", .path.display())]
+    #[error("failed reading claim from path `{}`: {}", .path.display(), .source)]
     Local { path: PathBuf, source: Box<Error> },
     #[error("failed fetching claim from remote: {url}")]
     Remote { url: Url, source: Box<Error> },

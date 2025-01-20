@@ -292,13 +292,12 @@ fn find_components_without_sources<V>(
     components: &[crate::ManifestComponent],
     sources: &HashMap<String, V>,
 ) -> Vec<String> {
-    let mut components_without_url = Vec::new();
-    for component in components {
+    components.iter().filter_map( |component|
         if !sources.contains_key(&component.name) {
-            components_without_url.push(component.name.clone());
-        }
-    }
-    components_without_url
+            Some(component.name.clone())
+        } else {
+            None
+        }).collect()
 }
 
 pub struct ClaimVerificationContext<'a>(pub &'a VerifyingKey);

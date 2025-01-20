@@ -148,7 +148,7 @@ impl Component {
             .open(uncompressed_path_verified)
         {
             warn!(
-                "failed marking component `{}` as verified: {e:?}",
+                "failed marking manifest component `{}` as verified: {e:?}",
                 self.manifest_component.name
             )
         }
