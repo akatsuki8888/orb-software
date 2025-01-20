@@ -203,6 +203,13 @@ def populate-mock-mmcblk [mmcblk] {
 }
 # NOTE: only works if built with 'cargo build --features skip-manifest-signature-verification'
 
+def mock-systemctl [f] {
+	["#!/bin/sh"
+	 ""
+	 "echo $@"] | save --force $f
+	chmod +x $f
+}
+
 def cmp-xz-with-partition [ota_file, partition_img] {
     let res = (xzcat $ota_file | cmp $partition_img - | complete)
 
@@ -237,6 +244,7 @@ export def "main mock" [mock_path] {
     let mmcblk0 = populate-mock-mmcblk $"($mock_path)/mmcblk0"
     mkdir $"($mock_path)/mnt"
     let mock_mnt = populate-mnt $"($mock_path)/mnt"
+    let mock_mnt = mock-systemctl $"($mock_path)/systemctl"
 }
 
 def "main run" [prog, mock_path] {
@@ -252,6 +260,7 @@ def "main run" [prog, mock_path] {
      --mount=type=bind,src=./orb_update_agent.conf,dst=/etc/orb_update_agent.conf,relabel=shared,ro
      --mount=type=bind,src=($mock_path)/usr_persistent,dst=/usr/persistent/,rw,relabel=shared
      --mount=type=bind,src=($mock_path)/mnt,dst=/var/mnt,ro,relabel=shared
+     --mount=type=bind,src=($mock_path)/systemctl,dst=/usr/bin/systemctl,ro,relabel=shared
      --mount=type=tmpfs,dst=/var/mnt/updates/,rw
      --mount=type=bind,src=($mock_path)/mmcblk0,dst=/dev/mmcblk0,rw,relabel=shared
      -e RUST_BACKTRACE
