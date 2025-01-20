@@ -272,29 +272,14 @@ def "main run" [prog, mock_path] {
 def "main check" [mock_path] {
     let $mmcblk0 = $"($mock_path)/mmcblk0"
     ["run"
-    "download /dev/sda2  ./APP_b.after_ota.img"
-    "download /dev/sda19 ./SOFTWARE_LAYER_b.after_ota.img"
-    "download /dev/sda16 ./SYSTEM_LAYER_b.after_ota.img"
-    "download /dev/sda20 ./CACHE_LAYER_b.after_ota.img"
+    "download /dev/sda15 ./CUDA_LAYER_b.after_ota.img"
     ] | str join "\n" | guestfish --rw -a $mmcblk0
 
 
-    if not (cmp-xz-with-partition ./s3_bucket/app.xz APP_b.after_ota.img) {
-        log error "APP_b Test failed"
+    if not (cmp-img-with-partition $"($mock_path)/mnt/cuda_layer.img" ./CUDA_LAYER_b.after_ota.img) {
+        log error "CUDA_LAYER_b Test failed"
     }
-
-    if not (cmp-img-with-partition ./s3_bucket/software_layer.img SOFTWARE_LAYER_b.after_ota.img) {
-        log error "SOFTWARE_LAYER_b Test failed"
-    }
-
-    if not (cmp-img-with-partition ./s3_bucket/system_layer.img SYSTEM_LAYER_b.after_ota.img) {
-        log error "SYSTEM_LAYER_b Test failed"
-    }
-
-    if not (cmp-img-with-partition ./s3_bucket/cache_layer.img CACHE_LAYER_b.after_ota.img) {
-        log error "CACHE_LAYER_b Test failed"
-    }
-    rm APP_b.after_ota.img
+    rm ./CUDA_LAYER_b.after_ota.img
 }
 
 export def "main clean" [mock_path] {
