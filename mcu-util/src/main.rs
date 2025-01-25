@@ -267,7 +267,7 @@ fn clap_v3_styles() -> Styles {
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    orb_telemetry::TelemetryConfig::new().init();
+    let _telemetry_guard = orb_telemetry::TelemetryConfig::new().init();
 
     let args = Args::parse();
 

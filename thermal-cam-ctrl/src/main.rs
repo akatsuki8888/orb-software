@@ -110,7 +110,7 @@ enum Flow {
 
 fn main() -> Result<()> {
     color_eyre::install()?;
-    orb_telemetry::TelemetryConfig::new()
+    let _telemetry_guard = orb_telemetry::TelemetryConfig::new()
         .with_journald(SYSLOG_IDENTIFIER)
         .init();
 

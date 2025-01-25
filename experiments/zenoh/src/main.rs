@@ -17,7 +17,7 @@ enum Args {
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-    orb_telemetry::TelemetryConfig::new().init();
+    let _telemetry_guard = orb_telemetry::TelemetryConfig::new().init();
     tracing::debug!("debug logging is enabled");
 
     let args = Args::parse();
