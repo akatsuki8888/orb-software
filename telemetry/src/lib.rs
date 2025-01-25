@@ -23,14 +23,14 @@ pub struct OpentelemetryAttributes {
 
 /// To more easily construct this, use [`OpentelmetryLayerBuilder`].
 #[derive(Debug)]
-pub struct OpentelemetryConfig<F> {
+pub struct OpentelemetryConfig {
     /// The tracer that will be used for opentelmetry.
     pub tracer: opentelemetry_sdk::trace::Tracer,
     /// The layer filter that will be used, might be None.
-    pub filter: F,
+    pub filter: Option<tracing_subscriber::filter::Targets>,
 }
 
-impl<F> OpentelemetryConfig<Option<F>> {
+impl OpentelemetryConfig {
     pub fn new(
         attrs: OpentelemetryAttributes,
     ) -> Result<Self, opentelemetry::trace::TraceError> {
@@ -59,13 +59,13 @@ impl<F> OpentelemetryConfig<Option<F>> {
 }
 
 #[derive(Debug)]
-pub struct TelemetryConfig<F> {
+pub struct TelemetryConfig {
     syslog_identifier: Option<String>,
     global_filter: EnvFilter,
-    otel_cfg: Option<OpentelemetryConfig<F>>,
+    otel_cfg: Option<OpentelemetryConfig>,
 }
 
-impl<F> TelemetryConfig<F> {
+impl TelemetryConfig {
     /// Provides all required arguments for telemetry configuration.
     /// - `log_identifier` will be used for journald, if appropriate.
     #[expect(clippy::new_without_default, reason = "may add required args later")]
@@ -102,7 +102,7 @@ impl<F> TelemetryConfig<F> {
     }
 
     #[must_use]
-    pub fn with_opentelemetry(self, cfg: OpentelemetryConfig<F>) -> Self {
+    pub fn with_opentelemetry(self, cfg: OpentelemetryConfig) -> Self {
         Self {
             otel_cfg: Some(cfg),
             ..self
@@ -110,10 +110,7 @@ impl<F> TelemetryConfig<F> {
     }
 }
 
-impl<F> TelemetryConfig<F>
-where
-    F: tracing_subscriber::layer::Filter<tracing_subscriber::Registry>,
-{
+impl TelemetryConfig {
     pub fn try_init(self) -> Result<(), tracing_subscriber::util::TryInitError> {
         let registry = tracing_subscriber::registry();
         // The type is only there to get it to compile.
