@@ -32,16 +32,22 @@ const SYSLOG_IDENTIFIER: &str = "worldcoin-backend-state";
 #[command(about, author, version=BUILD_INFO.version, styles=make_clap_v3_styles())]
 struct Cli {}
 
-// No need to waste RAM with a ton of threads, but we need at least 1 for telemetry.
-#[tokio::main(flavor = "multi_thread", worker_threads = 1)]
+// No need to waste RAM with a threadpool.
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    let _telemetry_guard = orb_telemetry::TelemetryConfig::new()
+    let telemetry = orb_telemetry::TelemetryConfig::new()
         .with_journald(SYSLOG_IDENTIFIER)
         .init();
 
-    let _args = Cli::parse();
+    let args = Cli::parse();
 
+    let result = main_inner(args).await;
+    telemetry.join().await;
+    result
+}
+
+async fn main_inner(_args: Cli) -> Result<()> {
     let conn = zbus::Connection::session()
         .await
         .wrap_err("failed to connect to zbus session")?;

@@ -17,15 +17,17 @@ enum Args {
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-    let _telemetry_guard = orb_telemetry::TelemetryConfig::new().init();
+    let telemetry = orb_telemetry::TelemetryConfig::new().init();
     tracing::debug!("debug logging is enabled");
 
     let args = Args::parse();
 
-    match args {
+    let result = match args {
         Args::Alice { .. } => alice(args).await,
         Args::Bob { .. } => bob(args).await,
-    }
+    };
+    telemetry.join().await;
+    result
 }
 
 async fn alice(args: Args) -> Result<()> {

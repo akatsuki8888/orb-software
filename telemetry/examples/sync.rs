@@ -8,16 +8,7 @@ const SERVICE_VERSION: &str = "v1.2.3"; // get this from orb-build-info instead
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
-    // You have to do this, otherwise opentelemetry will complain about missing a tokio reactor.
-    // Multithreaded runtime is necessary otherwise the code will deadlock
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .worker_threads(1)
-        .build()?;
-    let _rt_ctx = rt.enter();
-
-    let _telemetry_guard = orb_telemetry::TelemetryConfig::new()
-        // using opentelemetry will fail without a tokio reactor running.
+    let telemetry = orb_telemetry::TelemetryConfig::new()
         .with_opentelemetry(orb_telemetry::OpentelemetryConfig::new(
             orb_telemetry::OpentelemetryAttributes {
                 service_name: SERVICE_NAME.to_string(),
@@ -35,6 +26,8 @@ fn main() -> color_eyre::Result<()> {
     error!("ERROR");
 
     some_longer_task(69);
+
+    telemetry.join_blocking();
 
     Ok(())
 }

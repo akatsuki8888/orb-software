@@ -49,16 +49,20 @@ const CFG_ENV_VAR: &str = const_format::concatcp!(ENV_VAR_PREFIX, "CONFIG");
 const SYSLOG_IDENTIFIER: &str = "worldcoin-update-agent";
 
 fn main() -> UpdateAgentResult {
-    let _telemetry_guard = orb_telemetry::TelemetryConfig::new()
+    let telemetry = orb_telemetry::TelemetryConfig::new()
         .with_journald(SYSLOG_IDENTIFIER)
         .init();
 
     let args = Args::parse();
 
     match run(&args) {
-        Ok(_) => UpdateAgentResult::Success,
+        Ok(_) => {
+            telemetry.join_blocking();
+            UpdateAgentResult::Success
+        }
         Err(err) => {
             error!("{err:?}");
+            telemetry.join_blocking();
             err.into()
         }
     }

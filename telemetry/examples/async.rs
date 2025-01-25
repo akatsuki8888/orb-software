@@ -8,7 +8,7 @@ const SERVICE_VERSION: &str = "v1.2.3"; // You should use orb-build-info in your
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
-    let _telemetry_guard = orb_telemetry::TelemetryConfig::new()
+    let telemetry = orb_telemetry::TelemetryConfig::new()
         .with_opentelemetry(orb_telemetry::OpentelemetryConfig::new(
             orb_telemetry::OpentelemetryAttributes {
                 service_name: SERVICE_NAME.to_string(),
@@ -26,6 +26,8 @@ async fn main() -> color_eyre::Result<()> {
     error!("ERROR");
 
     some_longer_task(69).await;
+
+    telemetry.join().await;
 
     Ok(())
 }

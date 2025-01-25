@@ -13,6 +13,7 @@ use tracing_subscriber::{
 mod _otel_stuff {
     pub use opentelemetry::trace::TracerProvider;
     pub use opentelemetry::KeyValue;
+    pub use tokio::io::AsyncWriteExt as _;
     pub use tracing_subscriber::layer::Layer;
 }
 #[cfg(feature = "otel")]
@@ -49,6 +50,24 @@ impl OpentelemetryConfig {
     pub fn new(
         attrs: OpentelemetryAttributes,
     ) -> Result<Self, opentelemetry::trace::TraceError> {
+        // The otlp exporter for opentelemetry *requires* that a tokio runtime is
+        // present. To make this easier and less error prone in synchronous use cases,
+        // we create a new single threaded runtime if no runtime is currently present.
+        let rt = tokio::runtime::Handle::try_current().unwrap_or_else(|_| {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                tx.send(rt.handle().clone()).ok();
+                rt.block_on(std::future::pending::<()>())
+            });
+            rx.blocking_recv()
+                .expect("failed to create new tokio runtime")
+        });
+        let _tokio_ctx = rt.enter();
+
         let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
             .with_resource(opentelemetry_sdk::Resource::new([
                 KeyValue::new("service.name", attrs.service_name.clone()),
@@ -136,7 +155,7 @@ impl TelemetryConfig {
 
     pub fn try_init(
         self,
-    ) -> Result<TracingShutdownGuard, tracing_subscriber::util::TryInitError> {
+    ) -> Result<TelemetryFlusher, tracing_subscriber::util::TryInitError> {
         let registry = tracing_subscriber::registry();
         // The type is only there to get it to compile.
         let tokio_console_layer: Option<tracing_subscriber::layer::Identity> = None;
@@ -185,7 +204,7 @@ impl TelemetryConfig {
         let registry = registry.with(otel_layer);
         registry.with(self.global_filter).try_init()?;
 
-        Ok(TracingShutdownGuard {
+        Ok(TelemetryFlusher {
             #[cfg(feature = "otel")]
             otel_provider,
         })
@@ -196,20 +215,45 @@ impl TelemetryConfig {
     ///
     /// Calling this more than once or when another tracing subscriber is registered
     /// will cause a panic.
-    pub fn init(self) -> TracingShutdownGuard {
+    pub fn init(self) -> TelemetryFlusher {
         self.try_init().expect("failed to initialize orb-telemetry")
     }
 }
 
-/// Cleanup logic for tracing. Only drop at end of program.
-#[must_use = "will flush logs on drop"]
-pub struct TracingShutdownGuard {
+/// Allows flushing all telemetry logs.
+#[must_use = "call .join at the end of the program to flush logs, otherwise they may get lost"]
+pub struct TelemetryFlusher {
     #[cfg(feature = "otel")]
     otel_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
 }
 
-impl Drop for TracingShutdownGuard {
-    fn drop(&mut self) {
+impl TelemetryFlusher {
+    /// Call this at the end of the program.
+    pub async fn join(self) {
+        #[cfg(feature = "otel")]
+        {
+            let task = tokio::task::spawn_blocking(|| self.blocking_work());
+            task.await.unwrap();
+            tokio::io::stderr().flush().await.ok();
+            tokio::io::stdout().flush().await.ok();
+        }
+        #[cfg(not(feature = "otel"))]
+        {
+            // technically blocks, but no one really cares for stderr/out.
+            std::io::stderr().flush().ok();
+            std::io::stdout().flush().ok();
+        }
+    }
+
+    /// Call this at the end of the program.
+    pub fn join_blocking(self) {
+        self.blocking_work();
+        std::io::stderr().flush().ok();
+        std::io::stdout().flush().ok();
+    }
+
+    #[cfg_attr(not(feature = "otel"), expect(unused_mut))]
+    fn blocking_work(mut self) {
         #[cfg(feature = "otel")]
         if let Some(otel_provider) = self.otel_provider.take() {
             for flush_result in otel_provider.force_flush() {
@@ -223,7 +267,5 @@ impl Drop for TracingShutdownGuard {
                 eprintln!("failed to shutdown opentelemetry tracers, writing to stderr: {err:?}");
             }
         }
-        std::io::stderr().flush().ok();
-        std::io::stdout().flush().ok();
     }
 }
