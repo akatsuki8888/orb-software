@@ -5244,10 +5244,12 @@ dependencies = [
 name = "orb-telemetry"
 version = "0.0.0"
 dependencies = [
+ "color-eyre",
  "console-subscriber",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "tokio",
  "tracing",
  "tracing-journald",
  "tracing-opentelemetry",

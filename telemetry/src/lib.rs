@@ -1,4 +1,8 @@
-use std::io::IsTerminal as _;
+//! Standardized telemetry for the orb.
+//!
+//! See the `examples` dir. Start with [`TelemetryConfig::new()`].
+
+use std::io::{IsTerminal as _, Write as _};
 
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
@@ -21,11 +25,12 @@ pub struct OpentelemetryAttributes {
     pub additional_otel_attributes: Vec<opentelemetry::KeyValue>,
 }
 
-/// To more easily construct this, use [`OpentelmetryLayerBuilder`].
 #[derive(Debug)]
 pub struct OpentelemetryConfig {
     /// The tracer that will be used for opentelmetry.
-    pub tracer: opentelemetry_sdk::trace::Tracer,
+    pub tracer_provider: opentelemetry_sdk::trace::TracerProvider,
+    /// The name used for the tracer. Should be set to the service name.
+    pub tracer_name: String,
     /// The layer filter that will be used, might be None.
     pub filter: Option<tracing_subscriber::filter::Targets>,
 }
@@ -34,7 +39,7 @@ impl OpentelemetryConfig {
     pub fn new(
         attrs: OpentelemetryAttributes,
     ) -> Result<Self, opentelemetry::trace::TraceError> {
-        let trace_provider = opentelemetry_sdk::trace::TracerProvider::builder()
+        let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
             .with_resource(opentelemetry_sdk::Resource::new([
                 KeyValue::new("service.name", attrs.service_name.clone()),
                 KeyValue::new("service", attrs.service_name.clone()),
@@ -49,15 +54,22 @@ impl OpentelemetryConfig {
             )
             .build();
 
-        let tracer = trace_provider.tracer(attrs.service_name);
-
         Ok(Self {
-            tracer,
+            tracer_provider,
+            tracer_name: attrs.service_name,
             filter: None,
         })
     }
+
+    pub fn with_filter(self, filter: tracing_subscriber::filter::Targets) -> Self {
+        Self {
+            filter: Some(filter),
+            ..self
+        }
+    }
 }
 
+/// The toplevel config for the orb-telemetry crate. Start here.
 #[derive(Debug)]
 pub struct TelemetryConfig {
     syslog_identifier: Option<String>,
@@ -108,10 +120,10 @@ impl TelemetryConfig {
             ..self
         }
     }
-}
 
-impl TelemetryConfig {
-    pub fn try_init(self) -> Result<(), tracing_subscriber::util::TryInitError> {
+    pub fn try_init(
+        self,
+    ) -> Result<TracingShutdownGuard, tracing_subscriber::util::TryInitError> {
         let registry = tracing_subscriber::registry();
         // The type is only there to get it to compile.
         let tokio_console_layer: Option<tracing_subscriber::layer::Identity> = None;
@@ -137,18 +149,17 @@ impl TelemetryConfig {
             .is_none()
             .then(|| tracing_subscriber::fmt::layer().with_writer(std::io::stderr));
         assert!(stderr_layer.is_some() || journald_layer.is_some());
-        let otel_layer = if let Some(otel_cfg) = self.otel_cfg {
-            Some(
-                tracing_opentelemetry::layer()
-                    .with_level(true)
-                    .with_location(true)
-                    .with_threads(true)
-                    .with_tracer(otel_cfg.tracer)
-                    // commenting out this line fixes it
-                    .with_filter(otel_cfg.filter),
-            )
+        let (otel_layer, otel_provider) = if let Some(otel_cfg) = self.otel_cfg {
+            let tracer = otel_cfg.tracer_provider.tracer(otel_cfg.tracer_name);
+            let layer = tracing_opentelemetry::layer()
+                .with_level(true)
+                .with_location(true)
+                .with_threads(true)
+                .with_tracer(tracer)
+                .with_filter(otel_cfg.filter);
+            (Some(layer), Some(otel_cfg.tracer_provider))
         } else {
-            None
+            (None, None)
         };
         registry
             .with(tokio_console_layer)
@@ -156,7 +167,9 @@ impl TelemetryConfig {
             .with(journald_layer)
             .with(otel_layer)
             .with(self.global_filter)
-            .try_init()
+            .try_init()?;
+
+        Ok(TracingShutdownGuard { otel_provider })
     }
 
     /// Initializes the telemetry config. Call this only once, at the beginning of the
@@ -164,7 +177,32 @@ impl TelemetryConfig {
     ///
     /// Calling this more than once or when another tracing subscriber is registered
     /// will cause a panic.
-    pub fn init(self) {
+    pub fn init(self) -> TracingShutdownGuard {
         self.try_init().expect("failed to initialize orb-telemetry")
+    }
+}
+
+/// Cleanup logic for tracing. Only drop at end of program.
+#[must_use = "will flush logs on drop"]
+pub struct TracingShutdownGuard {
+    otel_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
+}
+
+impl Drop for TracingShutdownGuard {
+    fn drop(&mut self) {
+        if let Some(otel_provider) = self.otel_provider.take() {
+            for flush_result in otel_provider.force_flush() {
+                if let Err(err) = flush_result {
+                    // use stderr because tracing is not working
+                    eprintln!("failed to flush opentelemetry tracers, writing to stderr: {err:?}");
+                }
+            }
+            if let Err(err) = otel_provider.shutdown() {
+                // use stderr because tracing is not working
+                eprintln!("failed to shutdown opentelemetry tracers, writing to stderr: {err:?}");
+            }
+        }
+        std::io::stderr().flush().ok();
+        std::io::stdout().flush().ok();
     }
 }

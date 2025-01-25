@@ -19,6 +19,10 @@ tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["registry", "env-filter"] }
 tracing.workspace = true
 
+[dev-dependencies]
+color-eyre.workspace = true
+tokio.workspace = true
+
 [target.'cfg(tokio_unstable)'.dependencies]
 console-subscriber.workspace = true
 
