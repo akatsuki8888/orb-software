@@ -16,7 +16,7 @@ fn main() -> color_eyre::Result<()> {
         .build()?;
     let _rt_ctx = rt.enter();
 
-    let _tracing_guard = orb_telemetry::TelemetryConfig::new()
+    let _telemetry_guard = orb_telemetry::TelemetryConfig::new()
         // using opentelemetry will fail without a tokio reactor running.
         .with_opentelemetry(orb_telemetry::OpentelemetryConfig::new(
             orb_telemetry::OpentelemetryAttributes {

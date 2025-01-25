@@ -4,18 +4,26 @@
 
 use std::io::{IsTerminal as _, Write as _};
 
-use opentelemetry::trace::TracerProvider;
-use opentelemetry::KeyValue;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{
-    layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter, Layer,
+    layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter,
 };
+
+#[cfg(feature = "otel")]
+mod _otel_stuff {
+    pub use opentelemetry::trace::TracerProvider;
+    pub use opentelemetry::KeyValue;
+    pub use tracing_subscriber::layer::Layer;
+}
+#[cfg(feature = "otel")]
+use self::_otel_stuff::*;
 
 /// Represents the attributes that will be attached to opentelemetry data for this
 /// service.
 ///
 /// This is similar in concept to datadog Tags.
 #[derive(Debug)]
+#[cfg(feature = "otel")]
 pub struct OpentelemetryAttributes {
     /// Name of the service
     pub service_name: String,
@@ -26,6 +34,7 @@ pub struct OpentelemetryAttributes {
 }
 
 #[derive(Debug)]
+#[cfg(feature = "otel")]
 pub struct OpentelemetryConfig {
     /// The tracer that will be used for opentelmetry.
     pub tracer_provider: opentelemetry_sdk::trace::TracerProvider,
@@ -35,6 +44,7 @@ pub struct OpentelemetryConfig {
     pub filter: Option<tracing_subscriber::filter::Targets>,
 }
 
+#[cfg(feature = "otel")]
 impl OpentelemetryConfig {
     pub fn new(
         attrs: OpentelemetryAttributes,
@@ -74,6 +84,7 @@ impl OpentelemetryConfig {
 pub struct TelemetryConfig {
     syslog_identifier: Option<String>,
     global_filter: EnvFilter,
+    #[cfg(feature = "otel")]
     otel_cfg: Option<OpentelemetryConfig>,
 }
 
@@ -88,6 +99,7 @@ impl TelemetryConfig {
             global_filter: EnvFilter::builder()
                 .with_default_directive(LevelFilter::INFO.into())
                 .from_env_lossy(),
+            #[cfg(feature = "otel")]
             otel_cfg: None,
         }
     }
@@ -113,6 +125,7 @@ impl TelemetryConfig {
         }
     }
 
+    #[cfg(feature = "otel")]
     #[must_use]
     pub fn with_opentelemetry(self, cfg: OpentelemetryConfig) -> Self {
         Self {
@@ -149,6 +162,8 @@ impl TelemetryConfig {
             .is_none()
             .then(|| tracing_subscriber::fmt::layer().with_writer(std::io::stderr));
         assert!(stderr_layer.is_some() || journald_layer.is_some());
+
+        #[cfg(feature = "otel")]
         let (otel_layer, otel_provider) = if let Some(otel_cfg) = self.otel_cfg {
             let tracer = otel_cfg.tracer_provider.tracer(otel_cfg.tracer_name);
             let layer = tracing_opentelemetry::layer()
@@ -161,15 +176,19 @@ impl TelemetryConfig {
         } else {
             (None, None)
         };
-        registry
+
+        let registry = registry
             .with(tokio_console_layer)
             .with(stderr_layer)
-            .with(journald_layer)
-            .with(otel_layer)
-            .with(self.global_filter)
-            .try_init()?;
+            .with(journald_layer);
+        #[cfg(feature = "otel")]
+        let registry = registry.with(otel_layer);
+        registry.with(self.global_filter).try_init()?;
 
-        Ok(TracingShutdownGuard { otel_provider })
+        Ok(TracingShutdownGuard {
+            #[cfg(feature = "otel")]
+            otel_provider,
+        })
     }
 
     /// Initializes the telemetry config. Call this only once, at the beginning of the
@@ -185,11 +204,13 @@ impl TelemetryConfig {
 /// Cleanup logic for tracing. Only drop at end of program.
 #[must_use = "will flush logs on drop"]
 pub struct TracingShutdownGuard {
+    #[cfg(feature = "otel")]
     otel_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
 }
 
 impl Drop for TracingShutdownGuard {
     fn drop(&mut self) {
+        #[cfg(feature = "otel")]
         if let Some(otel_provider) = self.otel_provider.take() {
             for flush_result in otel_provider.force_flush() {
                 if let Err(err) = flush_result {

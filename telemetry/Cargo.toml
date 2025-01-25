@@ -10,12 +10,21 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["otel"]
+otel = [
+  "dep:opentelemetry",
+  "dep:opentelemetry-otlp",
+  "dep:opentelemetry_sdk",
+  "dep:tracing-opentelemetry",
+]
+
 [dependencies]
-opentelemetry-otlp = { workspace = true, features = ["trace", "grpc-tonic"] }
-opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
-opentelemetry.workspace = true
+opentelemetry-otlp = { workspace = true, features = ["trace", "grpc-tonic"], optional = true }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio"], optional = true }
+opentelemetry = { workspace = true, optional = true }
 tracing-journald.workspace = true
-tracing-opentelemetry = { workspace = true }
+tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, features = ["registry", "env-filter"] }
 tracing.workspace = true
 
