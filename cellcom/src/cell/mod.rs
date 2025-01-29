@@ -8,27 +8,28 @@ use parser::{parse_neighbor_cells, parse_serving_cell};
 use serialport::SerialPort;
 use std::io::{Read, Write};
 use std::time::Duration;
+use tracing::{debug, warn};
 
 /// Represents a connection to the EC25 modem for issuing QENG commands.
 pub struct EC25Modem {
     // TODO: maybe genercize this idk
     port: Box<dyn SerialPort>,
-    debug: bool,
 }
 
 impl EC25Modem {
     /// Opens the specified serial device and returns a new EC25Modem.
-    pub fn new(device: &str, debug: bool) -> Result<Self> {
+    pub fn new(device: &str) -> Result<Self> {
         let port = serialport::new(device, 115_200)
             .timeout(Duration::from_secs(2))
             .open()
             .with_context(|| format!("Failed to open serial port '{}'", device))?;
 
-        Ok(Self { port, debug })
+        Ok(Self { port })
     }
 
     /// Sends an AT command, returning the raw response string until "OK" or "ERROR".
     fn send_command(&mut self, command: &str) -> Result<String> {
+        debug!("Sending AT command: {}", command);
         let cmd = format!("{}\r\n", command);
         self.port.write_all(cmd.as_bytes())?;
         let mut response = String::new();
@@ -46,8 +47,10 @@ impl EC25Modem {
             }
         }
 
-        if self.debug {
-            eprintln!("Debug: Sent '{}' => Received:\n{}", command, response);
+        if response.contains("ERROR") {
+            warn!("AT command returned error: {}", response);
+        } else {
+            debug!("AT command response: {}", response);
         }
 
         Ok(response)
@@ -56,15 +59,20 @@ impl EC25Modem {
     /// Issues AT+QENG="servingcell" and parses into a ServingCell.
     pub fn get_serving_cell(&mut self) -> Result<ServingCell> {
         let response = self.send_command("AT+QENG=\"servingcell\"")?;
-        parse_serving_cell(&response)
-            .with_context(|| "Failed to parse serving cell info from the EC25 response")
+        let cell = parse_serving_cell(&response).with_context(|| {
+            "Failed to parse serving cell info from the EC25 response"
+        })?;
+        debug!(?cell, "Parsed serving cell info");
+        Ok(cell)
     }
 
     /// Issues AT+QENG="neighbourcell" and parses into a list of NeighborCell.
     pub fn get_neighbor_cells(&mut self) -> Result<Vec<NeighborCell>> {
         let response = self.send_command("AT+QENG=\"neighbourcell\"")?;
-        parse_neighbor_cells(&response).with_context(|| {
+        let cells = parse_neighbor_cells(&response).with_context(|| {
             "Failed to parse neighbor cell info from the EC25 response"
-        })
+        })?;
+        debug!(cell_count = cells.len(), "Parsed neighbor cells");
+        Ok(cells)
     }
 }

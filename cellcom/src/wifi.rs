@@ -1,4 +1,5 @@
 use std::{path::Path, time::Duration};
+use tracing::{debug, trace, warn};
 use wpactrl::{Client, ClientAttached};
 
 use crate::data::WifiNetwork;
@@ -19,14 +20,18 @@ impl WpaSupplicant {
     }
 
     pub fn scan_wifi(&mut self) -> Result<Vec<WifiNetwork>> {
+        debug!("Initiating WiFi scan");
         self.ctrl
             .request("SCAN")
             .context("Failed to initiate scan")?;
+
+        debug!("Waiting for scan results");
         self.wait_for_event(
             "CTRL-EVENT-SCAN-RESULTS",
             Duration::from_secs(SCAN_TIMEOUT_SECS),
         )?;
 
+        debug!("Fetching scan results");
         let scan_results = self
             .ctrl
             .request("SCAN_RESULTS")
@@ -37,13 +42,14 @@ impl WpaSupplicant {
             // skip header
             match parse_scan_result(line, self.filter_macs) {
                 Ok(network) => networks.push(network),
-                Err(e) => eprintln!(
-                    "Warning: Failed to parse scan result line '{}': {}",
-                    line, e
-                ),
+                Err(e) if e.to_string().contains("invalid MAC address") => {
+                    trace!("Skipping filtered MAC address in scan result: {}", line);
+                }
+                Err(e) => warn!("Failed to parse scan result line '{}': {}", line, e),
             }
         }
 
+        debug!(network_count = networks.len(), "Parsed WiFi networks");
         Ok(networks)
     }
 
@@ -74,6 +80,7 @@ impl WpaSupplicant {
 fn is_valid_mac(mac: &str) -> bool {
     // Broadcast addresses
     if mac.to_uppercase() == "FF:FF:FF:FF:FF:FF" {
+        trace!(group = "broadcast", "filtered {mac}");
         return false;
     }
 
@@ -81,6 +88,7 @@ fn is_valid_mac(mac: &str) -> bool {
     if let Some(first_byte) = mac.split(':').next() {
         if let Ok(byte) = u8::from_str_radix(first_byte, 16) {
             if byte & 0x02 != 0 {
+                trace!(group = "u/l", "filtered {mac}");
                 return false;
             }
         }
@@ -88,9 +96,11 @@ fn is_valid_mac(mac: &str) -> bool {
 
     // IANA reserved range (00:00:5E:00:00:00 to 00:00:5E:FF:FF:FF)
     if mac.to_uppercase().starts_with("00:00:5E") {
+        trace!(group = "iana", "filtered {mac}");
         return false;
     }
 
+    trace!("passed {mac}");
     true
 }
 

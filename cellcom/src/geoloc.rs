@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use anyhow::Result;
+use tracing::{debug, error};
 
 use crate::data::{CellularInfo, WifiNetwork};
 
@@ -93,11 +94,12 @@ pub fn get_location(
 ) -> Result<GeolocationResponse> {
     let request = build_geolocation_request(cellular_info, wifi_networks)?;
 
-    let client = reqwest::blocking::Client::new();
-    println!(
-        "Sending geolocation request: {}",
-        serde_json::to_string_pretty(&request)?
+    debug!(
+        request = ?serde_json::to_string(&request)?,
+        "Sending geolocation request"
     );
+
+    let client = reqwest::blocking::Client::new();
     let response_raw = client
         .post(format!("{}?key={}", GOOGLE_GEOLOCATION_API_URL, api_key))
         .json(&request)
@@ -106,8 +108,8 @@ pub fn get_location(
     let response_text = response_raw.text()?;
     let response: GeolocationResponse =
         serde_json::from_str(&response_text).map_err(|e| {
-            eprintln!("Failed to parse response: {}", e);
-            eprintln!("Raw response: {}", response_text);
+            error!("Failed to parse response: {}", e);
+            error!("Raw response: {}", response_text);
             e
         })?;
 

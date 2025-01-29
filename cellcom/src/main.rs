@@ -4,6 +4,9 @@ use anyhow::Result;
 use clap::Parser;
 use serde_json::to_string_pretty;
 
+use tracing::{debug, info};
+use tracing_subscriber::{prelude::*, EnvFilter};
+
 use cellcom::{
     cell::EC25Modem,
     data::{CellularInfo, NetworkInfo},
@@ -30,9 +33,6 @@ struct Cli {
     )]
     wpa_ctrl_path: String,
 
-    #[arg(short = 'd', long = "debug", help = "Enables additional debug output")]
-    debug: bool,
-
     #[arg(long = "no-mac-filter", help = "Disable WiFi MAC address filtering")]
     no_mac_filter: bool,
 
@@ -47,13 +47,23 @@ struct Cli {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .init();
 
-    let mut modem = EC25Modem::new(&cli.modem, cli.debug)?;
+    info!("Initializing modem on {}", cli.modem);
+    let mut modem = EC25Modem::new(&cli.modem)?;
+
+    info!("Initializing WPA supplicant on {}", cli.wpa_ctrl_path);
     let mut wpa =
         WpaSupplicant::new(Path::new(&cli.wpa_ctrl_path), !cli.no_mac_filter)?;
 
+    info!(stage = "serving", "Fetching cellular information");
     let serving_cell = modem.get_serving_cell()?;
+    info!(stage = "neighbor", "Fetching cellular information");
     let neighbor_cells = modem.get_neighbor_cells()?;
+    info!("Scanning WiFi networks");
     let wifi_info = wpa.scan_wifi()?;
 
     let network_info = NetworkInfo {
@@ -64,9 +74,7 @@ fn main() -> Result<()> {
         },
     };
 
-    if cli.debug {
-        println!("{}", to_string_pretty(&network_info)?);
-    }
+    debug!(?network_info, "Network info collected");
 
     let location =
         get_location(&cli.api_key, &network_info.cellular, &network_info.wifi)?;
