@@ -20,7 +20,9 @@ pub fn parse_opt_u32(field: &str) -> Option<u32> {
 
 #[derive(Debug)]
 pub enum Ec25ServingCell {
-    Searching { state: String },
+    Searching {
+        state: String,
+    },
     Gsm(GsmServing),
     Wcdma(WcdmaServing),
     Lte(LteServing),
@@ -100,7 +102,10 @@ pub fn parse_ec25_serving_cell(fields: &[String]) -> Result<Ec25ServingCell> {
 
 fn parse_gsm_serving(state: String, fields: &[String]) -> Result<GsmServing> {
     if fields.len() < 8 {
-        return Err(anyhow!("Invalid GSM serving cell format. Fields: {:?}", fields));
+        return Err(anyhow!(
+            "Invalid GSM serving cell format. Fields: {:?}",
+            fields
+        ));
     }
     let mcc = parse_opt_u32(&fields[0]);
     let mnc = parse_opt_u32(&fields[1]);
@@ -194,4 +199,3 @@ fn parse_lte_serving(state: String, fields: &[String]) -> Result<LteServing> {
         sinr,
     })
 }
-

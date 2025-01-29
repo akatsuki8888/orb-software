@@ -11,7 +11,7 @@ pub struct ServingCell {
     /// - "FDD"
     /// - "TDD"
     /// - "-"
-    /// 
+    ///
     /// Only applies  for LTE RAT
     pub duplex_mode: String,
 

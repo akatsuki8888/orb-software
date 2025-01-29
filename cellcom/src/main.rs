@@ -1,11 +1,14 @@
 use std::path::Path;
 
+use anyhow::Result;
 use clap::Parser;
 use serde_json::to_string_pretty;
-use anyhow::Result;
 
 use cellcom::{
-    cell::EC25Modem, data::{CellularInfo, NetworkInfo}, geoloc::get_location, wifi::WpaSupplicant
+    cell::EC25Modem,
+    data::{CellularInfo, NetworkInfo},
+    geoloc::get_location,
+    wifi::WpaSupplicant,
 };
 
 #[derive(Parser)]
@@ -27,17 +30,10 @@ struct Cli {
     )]
     wpa_ctrl_path: String,
 
-    #[arg(
-        short = 'd',
-        long = "debug",
-        help = "Enables additional debug output"
-    )]
+    #[arg(short = 'd', long = "debug", help = "Enables additional debug output")]
     debug: bool,
 
-    #[arg(
-        long = "no-mac-filter",
-        help = "Disable WiFi MAC address filtering"
-    )]
+    #[arg(long = "no-mac-filter", help = "Disable WiFi MAC address filtering")]
     no_mac_filter: bool,
 
     #[arg(
@@ -53,7 +49,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let mut modem = EC25Modem::new(&cli.modem, cli.debug)?;
-    let mut wpa = WpaSupplicant::new(Path::new(&cli.wpa_ctrl_path), !cli.no_mac_filter)?;
+    let mut wpa =
+        WpaSupplicant::new(Path::new(&cli.wpa_ctrl_path), !cli.no_mac_filter)?;
 
     let serving_cell = modem.get_serving_cell()?;
     let neighbor_cells = modem.get_neighbor_cells()?;
@@ -71,9 +68,10 @@ fn main() -> Result<()> {
         println!("{}", to_string_pretty(&network_info)?);
     }
 
-    let location = get_location(&cli.api_key, &network_info.cellular, &network_info.wifi)?;
+    let location =
+        get_location(&cli.api_key, &network_info.cellular, &network_info.wifi)?;
 
     println!("{}", to_string_pretty(&location)?);
-    
+
     Ok(())
 }

@@ -19,36 +19,51 @@ impl WpaSupplicant {
     }
 
     pub fn scan_wifi(&mut self) -> Result<Vec<WifiNetwork>> {
-        self.ctrl.request("SCAN").context("Failed to initiate scan")?;
-        self.wait_for_event("CTRL-EVENT-SCAN-RESULTS", Duration::from_secs(SCAN_TIMEOUT_SECS))?;
+        self.ctrl
+            .request("SCAN")
+            .context("Failed to initiate scan")?;
+        self.wait_for_event(
+            "CTRL-EVENT-SCAN-RESULTS",
+            Duration::from_secs(SCAN_TIMEOUT_SECS),
+        )?;
 
-        let scan_results = self.ctrl.request("SCAN_RESULTS")
+        let scan_results = self
+            .ctrl
+            .request("SCAN_RESULTS")
             .context("Failed to get scan results")?;
 
         let mut networks = Vec::new();
-        for line in scan_results.lines().skip(1) { // skip header
+        for line in scan_results.lines().skip(1) {
+            // skip header
             match parse_scan_result(line, self.filter_macs) {
                 Ok(network) => networks.push(network),
-                Err(e) => eprintln!("Warning: Failed to parse scan result line '{}': {}", line, e),
+                Err(e) => eprintln!(
+                    "Warning: Failed to parse scan result line '{}': {}",
+                    line, e
+                ),
             }
         }
 
         Ok(networks)
     }
 
-    fn wait_for_event(&mut self, event_type: &str, timeout: Duration) -> Result<Option<String>> {
+    fn wait_for_event(
+        &mut self,
+        event_type: &str,
+        timeout: Duration,
+    ) -> Result<Option<String>> {
         let start_time = std::time::Instant::now();
-        
+
         while start_time.elapsed() < timeout {
             if let Some(msg) = self.ctrl.recv()? {
                 if msg.contains(event_type) {
                     return Ok(Some(msg));
                 }
             }
-            
+
             std::thread::sleep(Duration::from_millis(SCAN_POLL_INTERVAL_MS));
         }
-        
+
         Ok(None)
     }
 }
@@ -83,7 +98,7 @@ pub fn parse_scan_result(line: &str, filter_macs: bool) -> Result<WifiNetwork> {
     let fields: Vec<&str> = line.split('\t').collect();
 
     ensure!(fields.len() >= 5, "invalid scan result format");
-    
+
     let bssid = fields[0].to_string();
     if filter_macs {
         ensure!(is_valid_mac(&bssid), "invalid MAC address");
@@ -107,7 +122,7 @@ mod tests {
         // Valid
         assert!(is_valid_mac("00:11:22:33:44:55"));
         assert!(is_valid_mac("AC:DE:48:00:11:22"));
-        
+
         // Invalid
         assert!(!is_valid_mac("FF:FF:FF:FF:FF:FF")); // Broadcast
         assert!(!is_valid_mac("02:00:00:00:00:00")); // Locally administered
@@ -134,4 +149,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-

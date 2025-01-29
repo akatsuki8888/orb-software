@@ -15,11 +15,7 @@ struct Cli {
     )]
     modem: String,
 
-    #[arg(
-        short = 'd',
-        long = "debug",
-        help = "Enables additional debug output"
-    )]
+    #[arg(short = 'd', long = "debug", help = "Enables additional debug output")]
     debug: bool,
 }
 
@@ -29,7 +25,6 @@ fn main() -> Result<()> {
     let mut port = serialport::new(&cli.modem, 115200)
         .timeout(Duration::from_millis(1000))
         .open()?;
-
 
     let serving_cell = send_at_command(&mut port, "AT+QENG=\"servingcell\"")?;
     println!("Serving Cell Info:\n{}", serving_cell);
@@ -45,11 +40,11 @@ fn main() -> Result<()> {
 
 fn send_at_command(port: &mut Box<dyn SerialPort>, command: &str) -> Result<String> {
     let cmd = format!("{}\r\n", command);
-    port.write(cmd.as_bytes())?;
-    
+    port.write_all(cmd.as_bytes())?;
+
     let mut response = String::new();
     let mut buf = [0u8; 1024];
-    
+
     loop {
         match port.read(&mut buf) {
             Ok(n) if n > 0 => {

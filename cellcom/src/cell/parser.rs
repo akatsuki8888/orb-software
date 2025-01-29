@@ -1,9 +1,8 @@
-use anyhow::{anyhow, Result};
 use crate::cell::data::{NeighborCell, ServingCell};
 use crate::cell::types::{
-    parse_ec25_serving_cell, parse_opt_i32, parse_opt_u32,
-    Ec25ServingCell,
+    parse_ec25_serving_cell, parse_opt_i32, parse_opt_u32, Ec25ServingCell,
 };
+use anyhow::{anyhow, Result};
 
 fn split_quoted_fields(line: &str) -> Vec<String> {
     line.split(',')
@@ -18,7 +17,9 @@ pub fn parse_serving_cell(response: &str) -> Result<ServingCell> {
         .collect();
 
     if lines.is_empty() {
-        return Err(anyhow!("No +QENG: \"servingcell\" lines found in response."));
+        return Err(anyhow!(
+            "No +QENG: \"servingcell\" lines found in response."
+        ));
     }
 
     let mut final_parsed: Option<Ec25ServingCell> = None;
@@ -30,10 +31,15 @@ pub fn parse_serving_cell(response: &str) -> Result<ServingCell> {
             if !raw_fields.is_empty() {
                 match parse_ec25_serving_cell(&raw_fields) {
                     Ok(parsed) => {
-                        final_parsed = Some(merge_prefer_new(final_parsed.take(), parsed));
+                        final_parsed =
+                            Some(merge_prefer_new(final_parsed.take(), parsed));
                     }
                     Err(e) => {
-                        return Err(anyhow!("Failed to parse serving cell line '{}': {}", line, e));
+                        return Err(anyhow!(
+                            "Failed to parse serving cell line '{}': {}",
+                            line,
+                            e
+                        ));
                     }
                 }
             }
@@ -42,20 +48,25 @@ pub fn parse_serving_cell(response: &str) -> Result<ServingCell> {
 
     match final_parsed {
         Some(ec25) => Ok(ec25_into_serving_cell(ec25)),
-        None => Err(anyhow!("Could not parse any recognized serving cell lines.")),
+        None => Err(anyhow!(
+            "Could not parse any recognized serving cell lines."
+        )),
     }
 }
 
-fn merge_prefer_new(old: Option<Ec25ServingCell>, new: Ec25ServingCell) -> Ec25ServingCell {
+fn merge_prefer_new(
+    old: Option<Ec25ServingCell>,
+    new: Ec25ServingCell,
+) -> Ec25ServingCell {
     use Ec25ServingCell::*;
     match (old, new) {
         (None, new_val) => new_val,
         (Some(_), new_val @ Lte(_)) => new_val,
         (Some(_), new_val @ Wcdma(_)) => new_val,
         (Some(_), new_val @ Gsm(_)) => new_val,
-        (Some(old_val @ Lte(_)), Unknown{..}) => old_val,
-        (Some(old_val @ Wcdma(_)), Searching{..}) => old_val,
-        (Some(old_val @ Gsm(_)), Searching{..}) => old_val,
+        (Some(old_val @ Lte(_)), Unknown { .. }) => old_val,
+        (Some(old_val @ Wcdma(_)), Searching { .. }) => old_val,
+        (Some(old_val @ Gsm(_)), Searching { .. }) => old_val,
         (Some(_), new_val) => new_val,
     }
 }
@@ -77,7 +88,11 @@ fn ec25_into_serving_cell(ec25: Ec25ServingCell) -> ServingCell {
             rssi: None,
             sinr: None,
         },
-        Unknown { state, rat, raw_fields } => ServingCell {
+        Unknown {
+            state,
+            rat,
+            raw_fields,
+        } => ServingCell {
             connection_status: state,
             network_type: rat,
             duplex_mode: "-".to_string(),
@@ -144,7 +159,7 @@ pub fn parse_neighbor_cells(response: &str) -> Result<Vec<NeighborCell>> {
     // neighbourcell information (which should mean we're on the same
     // cell as the servingcell if we're on LTE) and seed a couple
     // additional cell-tower fields instead of the lone one we get ATM
-    const NEIGHBOURCELL_PREFIX: &'static str = "+QENG: \"neighbourcell";
+    const NEIGHBOURCELL_PREFIX: &str = "+QENG: \"neighbourcell";
 
     let mut results = Vec::new();
 
@@ -173,7 +188,7 @@ pub fn parse_neighbor_cells(response: &str) -> Result<Vec<NeighborCell>> {
 /// Parse neighbourcell fields based on RAT
 ///
 /// ## TODO
-/// This should maybe normalize out hex fields into just numeric fields 
+/// This should maybe normalize out hex fields into just numeric fields
 /// or do better bounds checking...
 fn parse_neighbor_fields(rat: &str, fields: &[String]) -> Option<NeighborCell> {
     match rat {
@@ -297,36 +312,35 @@ mod tests {
         assert_eq!(parsed.sinr, Some(25));
     }
 
-#[test]
-fn test_parse_neighbor_cells_gsm() {
-    let raw = r#"
+    #[test]
+    fn test_parse_neighbor_cells_gsm() {
+        let raw = r#"
         +QENG: "neighbourcell","GSM",460,01,5504,2B55,52,123,0
         +QENG: "neighbourcell","GSM",99,100,101,102,103,104,105
     "#;
-    let cells = parse_neighbor_cells(raw).unwrap();
-    assert_eq!(cells.len(), 2);
-    assert_eq!(cells[0].network_type, "GSM");
-    assert_eq!(cells[0].channel_or_arfcn, Some(123));
-    assert_eq!(cells[0].pcid_or_psc, Some(52));
-    assert_eq!(cells[1].channel_or_arfcn, Some(104));
-    assert_eq!(cells[1].pcid_or_psc, Some(103));
-}
+        let cells = parse_neighbor_cells(raw).unwrap();
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[0].network_type, "GSM");
+        assert_eq!(cells[0].channel_or_arfcn, Some(123));
+        assert_eq!(cells[0].pcid_or_psc, Some(52));
+        assert_eq!(cells[1].channel_or_arfcn, Some(104));
+        assert_eq!(cells[1].pcid_or_psc, Some(103));
+    }
 
-#[test]
-fn test_parse_neighbor_cells_lte() {
-    let raw = r#"
+    #[test]
+    fn test_parse_neighbor_cells_lte() {
+        let raw = r#"
         +QENG: "neighbourcell intra","LTE",38950,276,-3,-88,-65,0,37,7,16
         +QENG: "neighbourcell inter","LTE",39148,-,-,-,-,-,37,0,30,7
     "#;
-    let cells = parse_neighbor_cells(raw).unwrap();
-    assert_eq!(cells.len(), 2);
-    assert_eq!(cells[0].network_type, "LTE");
-    assert_eq!(cells[0].channel_or_arfcn, Some(38950));
-    assert_eq!(cells[0].pcid_or_psc, Some(276));
-    assert_eq!(cells[0].rsrp, Some(-3));
-    assert_eq!(cells[0].rsrq, Some(-88));
-    assert_eq!(cells[0].rssi, Some(-65));
-    assert_eq!(cells[0].sinr, Some(0));
+        let cells = parse_neighbor_cells(raw).unwrap();
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[0].network_type, "LTE");
+        assert_eq!(cells[0].channel_or_arfcn, Some(38950));
+        assert_eq!(cells[0].pcid_or_psc, Some(276));
+        assert_eq!(cells[0].rsrp, Some(-3));
+        assert_eq!(cells[0].rsrq, Some(-88));
+        assert_eq!(cells[0].rssi, Some(-65));
+        assert_eq!(cells[0].sinr, Some(0));
+    }
 }
-}
-

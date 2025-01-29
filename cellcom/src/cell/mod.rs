@@ -1,16 +1,17 @@
-pub mod parser;
 pub mod data;
+pub mod parser;
 pub mod types;
 
 use anyhow::{Context, Result};
+pub use data::{NeighborCell, ServingCell};
+use parser::{parse_neighbor_cells, parse_serving_cell};
+use serialport::SerialPort;
 use std::io::{Read, Write};
 use std::time::Duration;
-use serialport::SerialPort;
-use parser::{parse_serving_cell, parse_neighbor_cells};
-pub use data::{ServingCell, NeighborCell};
 
 /// Represents a connection to the EC25 modem for issuing QENG commands.
 pub struct EC25Modem {
+    // TODO: maybe genercize this idk
     port: Box<dyn SerialPort>,
     debug: bool,
 }
@@ -62,8 +63,8 @@ impl EC25Modem {
     /// Issues AT+QENG="neighbourcell" and parses into a list of NeighborCell.
     pub fn get_neighbor_cells(&mut self) -> Result<Vec<NeighborCell>> {
         let response = self.send_command("AT+QENG=\"neighbourcell\"")?;
-        parse_neighbor_cells(&response)
-            .with_context(|| "Failed to parse neighbor cell info from the EC25 response")
+        parse_neighbor_cells(&response).with_context(|| {
+            "Failed to parse neighbor cell info from the EC25 response"
+        })
     }
 }
-

@@ -9,13 +9,20 @@ use anyhow::Result;
 
 use crate::data::{CellularInfo, WifiNetwork};
 
-const GOOGLE_GEOLOCATION_API_URL: &str = "https://www.googleapis.com/geolocation/v1/geolocate";
+const GOOGLE_GEOLOCATION_API_URL: &str =
+    "https://www.googleapis.com/geolocation/v1/geolocate";
 
 #[derive(Serialize, Debug)]
 struct GeolocationRequest {
-    #[serde(skip_serializing_if = "Option::is_none", rename = "homeMobileCountryCode")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "homeMobileCountryCode"
+    )]
     home_mobile_country_code: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "homeMobileNetworkCode")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "homeMobileNetworkCode"
+    )]
     home_mobile_network_code: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "radioType")]
     radio_type: Option<String>,
@@ -62,13 +69,8 @@ struct WifiAccessPoint {
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum GeolocationResponse {
-    Success {
-        location: Location,
-        accuracy: f64,
-    },
-    Error {
-        error: GoogleError,
-    },
+    Success { location: Location, accuracy: f64 },
+    Error { error: GoogleError },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -90,26 +92,32 @@ pub fn get_location(
     wifi_networks: &[WifiNetwork],
 ) -> Result<GeolocationResponse> {
     let request = build_geolocation_request(cellular_info, wifi_networks)?;
-    
+
     let client = reqwest::blocking::Client::new();
-    println!("Sending geolocation request: {}", serde_json::to_string_pretty(&request)?);
+    println!(
+        "Sending geolocation request: {}",
+        serde_json::to_string_pretty(&request)?
+    );
     let response_raw = client
         .post(format!("{}?key={}", GOOGLE_GEOLOCATION_API_URL, api_key))
         .json(&request)
         .send()?;
-        
+
     let response_text = response_raw.text()?;
-    let response: GeolocationResponse = serde_json::from_str(&response_text).map_err(|e| {
-        eprintln!("Failed to parse response: {}", e);
-        eprintln!("Raw response: {}", response_text);
-        e
-    })?;
+    let response: GeolocationResponse =
+        serde_json::from_str(&response_text).map_err(|e| {
+            eprintln!("Failed to parse response: {}", e);
+            eprintln!("Raw response: {}", response_text);
+            e
+        })?;
 
     match response {
         GeolocationResponse::Success { .. } => Ok(response),
-        GeolocationResponse::Error { error } => {
-            Err(anyhow::anyhow!("Google API error: {} ({})", error.message, error.code))
-        }
+        GeolocationResponse::Error { error } => Err(anyhow::anyhow!(
+            "Google API error: {} ({})",
+            error.message,
+            error.code
+        )),
     }
 }
 
@@ -118,7 +126,7 @@ fn build_geolocation_request(
     wifi_networks: &[WifiNetwork],
 ) -> Result<GeolocationRequest> {
     let serving_cell = &cellular_info.serving_cell;
-    
+
     let cell_towers = vec![CellTower {
         cell_id: u32::from_str_radix(&serving_cell.cell_id, 16)?,
         location_area_code: None,
@@ -164,7 +172,7 @@ mod tests {
                 duplex_mode: "FDD".to_string(),
                 mcc: Some(310),
                 mnc: Some(260),
-                cell_id: "00AB12".to_string(),  // hex
+                cell_id: "00AB12".to_string(), // hex
                 channel_or_arfcn: Some(100),
                 pcid_or_psc: Some(22),
                 rsrp: Some(-90),
@@ -175,15 +183,13 @@ mod tests {
             neighbor_cells: vec![], // not used in build_geolocation_request
         };
 
-        let wifi_networks = vec![
-            WifiNetwork {
-                bssid: "00:11:22:33:44:55".into(),
-                frequency: 2412,
-                signal_level: -45,
-                flags: "[WPA2-PSK-CCMP][ESS]".into(),
-                ssid: "TestAP".into(),
-            }
-        ];
+        let wifi_networks = vec![WifiNetwork {
+            bssid: "00:11:22:33:44:55".into(),
+            frequency: 2412,
+            signal_level: -45,
+            flags: "[WPA2-PSK-CCMP][ESS]".into(),
+            ssid: "TestAP".into(),
+        }];
 
         let req = build_geolocation_request(&cellular_info, &wifi_networks).unwrap();
 
@@ -224,7 +230,8 @@ mod tests {
         };
 
         let wifi_networks = vec![];
-        let err = build_geolocation_request(&cellular_info, &wifi_networks).unwrap_err();
+        let err =
+            build_geolocation_request(&cellular_info, &wifi_networks).unwrap_err();
 
         assert!(err.to_string().contains("invalid digit"));
     }
